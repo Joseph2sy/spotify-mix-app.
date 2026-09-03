@@ -1,5 +1,4 @@
-spotipy
-requests
 streamlit
-python-dotenv
-pyarrow<15.0.0
+spotipy
+pyarrow>=18.0.0
+pandas
