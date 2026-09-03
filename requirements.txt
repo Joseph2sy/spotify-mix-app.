@@ -2,3 +2,4 @@ spotipy
 requests
 streamlit
 python-dotenv
+pyarrow<15.0.0
