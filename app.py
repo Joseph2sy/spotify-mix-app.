@@ -6,6 +6,8 @@ st.set_page_config(
     layout="wide",
 )
 
+from urllib.parse import urlparse
+
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
@@ -24,23 +26,19 @@ SCOPES = (
 TOKEN_KEY = "spotify_token"
 PROFILE_KEY = "spotify_profile"
 PLAYLISTS_KEY = "spotify_playlists"
+LIKED_TRACKS_KEY = "spotify_liked_tracks"
+MIX_DATA_KEY = "spotify_mix_data"
 
 
 # ============================================================
-# CONFIGURACIÓN DE SPOTIFY
+# SPOTIFY OAUTH
 # ============================================================
 
-def get_spotify_oauth():
+def create_spotify_oauth():
     try:
         client_id = st.secrets["SPOTIPY_CLIENT_ID"]
         client_secret = st.secrets["SPOTIPY_CLIENT_SECRET"]
         redirect_uri = st.secrets["SPOTIPY_REDIRECT_URI"]
-
-        if not client_id or not client_secret or not redirect_uri:
-            raise ValueError(
-                "Faltan SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET "
-                "o SPOTIPY_REDIRECT_URI en los Secrets."
-            )
 
         return SpotifyOAuth(
             client_id=client_id,
@@ -52,53 +50,56 @@ def get_spotify_oauth():
             show_dialog=True,
         )
 
+    except KeyError as e:
+        st.error(
+            f"Falta el secreto de Spotify: {e}"
+        )
+        return None
+
     except Exception as e:
-        st.error("No se pudieron cargar las credenciales de Spotify.")
+        st.error(
+            "No se pudo configurar la autenticación de Spotify."
+        )
         st.exception(e)
         return None
 
 
-# ============================================================
-# AUTENTICACIÓN
-# ============================================================
-
-def login():
-    """
-    Genera directamente la URL externa de Spotify.
-    SpotifyOAuth.get_authorize_url() debe devolver una URL
-    que comienza por https://accounts.spotify.com/authorize
-    """
-    sp_oauth = get_spotify_oauth()
-
-    if sp_oauth is None:
-        return None
-
+def get_spotify_auth_url():
     try:
+        sp_oauth = create_spotify_oauth()
+
+        if sp_oauth is None:
+            return None
+
         auth_url = sp_oauth.get_authorize_url()
 
-        # Validación adicional para evitar enviar una URL incorrecta.
-        if not auth_url.startswith(
-            "https://accounts.spotify.com/authorize"
-        ):
+        parsed = urlparse(auth_url)
+
+        if parsed.scheme != "https":
             raise ValueError(
-                "SpotifyOAuth generó una URL de autorización inválida."
+                "La URL de autorización no usa HTTPS."
+            )
+
+        if parsed.netloc != "accounts.spotify.com":
+            raise ValueError(
+                "SpotifyOAuth no generó una URL válida de Spotify."
             )
 
         return auth_url
 
     except Exception as e:
         st.error(
-            "No se pudo generar la URL de inicio de sesión de Spotify."
+            "No se pudo generar el enlace de inicio de sesión."
         )
         st.exception(e)
         return None
 
 
-def process_callback():
-    """
-    Procesa ?code=... después de que Spotify redirige
-    nuevamente a la aplicación.
-    """
+# ============================================================
+# CALLBACK
+# ============================================================
+
+def process_spotify_callback():
     code = st.query_params.get("code")
     error = st.query_params.get("error")
 
@@ -106,7 +107,6 @@ def process_callback():
         st.error(
             f"Spotify rechazó la autorización: {error}"
         )
-
         st.query_params.clear()
         return
 
@@ -114,7 +114,7 @@ def process_callback():
         return
 
     try:
-        sp_oauth = get_spotify_oauth()
+        sp_oauth = create_spotify_oauth()
 
         if sp_oauth is None:
             return
@@ -127,24 +127,25 @@ def process_callback():
 
         if not token_info:
             raise ValueError(
-                "Spotify no devolvió información del token."
+                "Spotify no devolvió un token."
             )
 
-        if "access_token" not in token_info:
+        access_token = token_info.get("access_token")
+
+        if not access_token:
             raise ValueError(
-                "La respuesta de Spotify no contiene access_token."
+                "Spotify no devolvió un access_token válido."
             )
 
         st.session_state[TOKEN_KEY] = token_info
 
-        # Elimina ?code=... de la URL.
         st.query_params.clear()
 
         st.rerun()
 
     except Exception as e:
         st.error(
-            "No se pudo completar la autenticación con Spotify."
+            "No se pudo completar el inicio de sesión con Spotify."
         )
         st.exception(e)
 
@@ -160,7 +161,7 @@ def get_access_token():
         return None
 
     try:
-        sp_oauth = get_spotify_oauth()
+        sp_oauth = create_spotify_oauth()
 
         if sp_oauth is None:
             return None
@@ -169,26 +170,30 @@ def get_access_token():
             refresh_token = token_info.get("refresh_token")
 
             if not refresh_token:
-                st.session_state.pop(TOKEN_KEY, None)
-                return None
+                raise ValueError(
+                    "La sesión expiró y no existe refresh token."
+                )
 
-            token_info = sp_oauth.refresh_access_token(
+            new_token = sp_oauth.refresh_access_token(
                 refresh_token
             )
 
-            st.session_state[TOKEN_KEY] = token_info
+            st.session_state[TOKEN_KEY] = new_token
+            token_info = new_token
 
         return token_info.get("access_token")
 
     except Exception as e:
         st.error(
-            "La sesión de Spotify no pudo renovarse."
+            "Tu sesión de Spotify expiró o no pudo renovarse."
         )
         st.exception(e)
 
         st.session_state.pop(TOKEN_KEY, None)
         st.session_state.pop(PROFILE_KEY, None)
         st.session_state.pop(PLAYLISTS_KEY, None)
+        st.session_state.pop(LIKED_TRACKS_KEY, None)
+        st.session_state.pop(MIX_DATA_KEY, None)
 
         return None
 
@@ -221,6 +226,8 @@ def logout():
         TOKEN_KEY,
         PROFILE_KEY,
         PLAYLISTS_KEY,
+        LIKED_TRACKS_KEY,
+        MIX_DATA_KEY,
     ]:
         st.session_state.pop(key, None)
 
@@ -229,18 +236,429 @@ def logout():
 
 
 # ============================================================
-# CALLBACK OAUTH
+# CARGAR PERFIL
 # ============================================================
 
-# Solo procesamos el callback cuando todavía no existe
-# una sesión autenticada.
+def load_profile(sp):
+    if PROFILE_KEY in st.session_state:
+        return st.session_state[PROFILE_KEY]
+
+    try:
+        profile = sp.current_user()
+
+        st.session_state[PROFILE_KEY] = profile
+
+        return profile
+
+    except Exception as e:
+        st.error(
+            "No se pudo cargar tu perfil de Spotify."
+        )
+        st.exception(e)
+        return None
+
+
+# ============================================================
+# CARGAR MIS ME GUSTA
+# ============================================================
+
+def load_liked_tracks(sp, force_reload=False):
+    if (
+        LIKED_TRACKS_KEY in st.session_state
+        and not force_reload
+    ):
+        return st.session_state[LIKED_TRACKS_KEY]
+
+    tracks = []
+
+    try:
+        offset = 0
+        limit = 50
+
+        while True:
+            response = sp.current_user_saved_tracks(
+                limit=limit,
+                offset=offset,
+            )
+
+            items = response.get(
+                "items",
+                []
+            )
+
+            for item in items:
+                track = item.get("track")
+
+                if not track:
+                    continue
+
+                if track.get("type") != "track":
+                    continue
+
+                track_id = track.get("id")
+
+                if not track_id:
+                    continue
+
+                artists = ", ".join(
+                    artist.get(
+                        "name",
+                        "Desconocido",
+                    )
+                    for artist in track.get(
+                        "artists",
+                        []
+                    )
+                )
+
+                tracks.append(
+                    {
+                        "id": track_id,
+                        "name": track.get(
+                            "name",
+                            "Sin nombre",
+                        ),
+                        "artist": artists,
+                        "uri": track.get(
+                            "uri"
+                        ),
+                        "duration_ms": track.get(
+                            "duration_ms"
+                        ),
+                        "album": track.get(
+                            "album",
+                            {}
+                        ).get(
+                            "name",
+                            "Sin álbum",
+                        ),
+                        "added_at": item.get(
+                            "added_at"
+                        ),
+                    }
+                )
+
+            if not response.get("next"):
+                break
+
+            offset += limit
+
+        st.session_state[LIKED_TRACKS_KEY] = tracks
+
+        return tracks
+
+    except Exception as e:
+        st.error(
+            "No se pudieron cargar tus canciones de 'Me gusta'."
+        )
+        st.exception(e)
+        return []
+
+
+# ============================================================
+# CARGAR PLAYLISTS
+# ============================================================
+
+def load_playlists(sp):
+    if PLAYLISTS_KEY in st.session_state:
+        return st.session_state[PLAYLISTS_KEY]
+
+    playlists = []
+
+    try:
+        offset = 0
+        limit = 50
+
+        while True:
+            response = sp.current_user_playlists(
+                limit=limit,
+                offset=offset,
+            )
+
+            items = response.get(
+                "items",
+                []
+            )
+
+            playlists.extend(items)
+
+            if not response.get("next"):
+                break
+
+            offset += limit
+
+        st.session_state[PLAYLISTS_KEY] = playlists
+
+        return playlists
+
+    except Exception as e:
+        st.error(
+            "No se pudieron cargar tus playlists."
+        )
+        st.exception(e)
+        return []
+
+
+# ============================================================
+# CARGAR CANCIONES DE PLAYLIST
+# ============================================================
+
+def load_playlist_tracks(sp, playlist_id):
+    tracks = []
+
+    try:
+        offset = 0
+        limit = 100
+
+        while True:
+            response = sp.playlist_items(
+                playlist_id,
+                limit=limit,
+                offset=offset,
+            )
+
+            items = response.get(
+                "items",
+                []
+            )
+
+            for item in items:
+                track = item.get("track")
+
+                if not track:
+                    continue
+
+                if track.get("type") != "track":
+                    continue
+
+                track_id = track.get("id")
+
+                if not track_id:
+                    continue
+
+                artists = ", ".join(
+                    artist.get(
+                        "name",
+                        "Desconocido",
+                    )
+                    for artist in track.get(
+                        "artists",
+                        []
+                    )
+                )
+
+                tracks.append(
+                    {
+                        "id": track_id,
+                        "name": track.get(
+                            "name",
+                            "Sin nombre",
+                        ),
+                        "artist": artists,
+                        "uri": track.get(
+                            "uri"
+                        ),
+                        "duration_ms": track.get(
+                            "duration_ms"
+                        ),
+                        "album": track.get(
+                            "album",
+                            {}
+                        ).get(
+                            "name",
+                            "Sin álbum",
+                        ),
+                    }
+                )
+
+            if not response.get("next"):
+                break
+
+            offset += limit
+
+        return tracks
+
+    except Exception as e:
+        st.error(
+            "No se pudieron cargar las canciones de la playlist."
+        )
+        st.exception(e)
+        return []
+
+
+# ============================================================
+# MÉTRICAS DE AUDIO
+# ============================================================
+
+def load_audio_features(sp, track_ids):
+    """
+    Intenta recuperar las métricas de audio de las canciones.
+
+    Spotify restringe actualmente el acceso a Audio Features
+    para determinadas aplicaciones nuevas, por lo que la función
+    tolera fallos y deja las métricas como no disponibles.
+    """
+
+    features = {}
+
+    if not track_ids:
+        return features
+
+    for start in range(
+        0,
+        len(track_ids),
+        100,
+    ):
+        batch = track_ids[
+            start:start + 100
+        ]
+
+        try:
+            result = sp.audio_features(batch)
+
+            if not result:
+                continue
+
+            for feature in result:
+                if not feature:
+                    continue
+
+                track_id = feature.get("id")
+
+                if track_id:
+                    features[track_id] = feature
+
+        except Exception:
+            continue
+
+    return features
+
+
+# ============================================================
+# CREAR DATOS DEL MIX
+# ============================================================
+
+def build_mix_data(tracks, audio_features):
+    result = []
+
+    for track in tracks:
+        track_id = track.get("id")
+
+        if not track_id:
+            continue
+
+        feature = audio_features.get(
+            track_id,
+            {}
+        )
+
+        result.append(
+            {
+                "id": track_id,
+                "name": track.get(
+                    "name",
+                    "Sin nombre",
+                ),
+                "artist": track.get(
+                    "artist",
+                    "Desconocido",
+                ),
+                "album": track.get(
+                    "album",
+                    "Sin álbum",
+                ),
+                "uri": track.get(
+                    "uri"
+                ),
+                "energy": feature.get(
+                    "energy"
+                ),
+                "danceability": feature.get(
+                    "danceability"
+                ),
+                "tempo": feature.get(
+                    "tempo"
+                ),
+                "valence": feature.get(
+                    "valence"
+                ),
+                "acousticness": feature.get(
+                    "acousticness"
+                ),
+            }
+        )
+
+    return result
+
+
+# ============================================================
+# ORDENAMIENTO
+# ============================================================
+
+def sort_for_mix(mix_data, strategy):
+    if not mix_data:
+        return []
+
+    metric_map = {
+        "Energía": "energy",
+        "BPM": "tempo",
+        "Bailabilidad": "danceability",
+        "Ánimo": "valence",
+        "Acústica": "acousticness",
+    }
+
+    metric = metric_map.get(
+        strategy
+    )
+
+    if not metric:
+        return mix_data
+
+    valid = [
+        track
+        for track in mix_data
+        if track.get(metric) is not None
+    ]
+
+    invalid = [
+        track
+        for track in mix_data
+        if track.get(metric) is None
+    ]
+
+    valid.sort(
+        key=lambda track: track.get(
+            metric,
+            0
+        )
+    )
+
+    return valid + invalid
+
+
+# ============================================================
+# ESTADO INICIAL
+# ============================================================
+
+if TOKEN_KEY not in st.session_state:
+    st.session_state[TOKEN_KEY] = None
+
+
+# ============================================================
+# PROCESAR CALLBACK
+# ============================================================
+
 if not st.session_state.get(TOKEN_KEY):
-    if st.query_params.get("code") or st.query_params.get("error"):
-        process_callback()
+
+    if (
+        st.query_params.get("code")
+        or st.query_params.get("error")
+    ):
+        process_spotify_callback()
 
 
 # ============================================================
-# INTERFAZ NO AUTENTICADA
+# PANTALLA DE LOGIN
 # ============================================================
 
 if not st.session_state.get(TOKEN_KEY):
@@ -248,18 +666,17 @@ if not st.session_state.get(TOKEN_KEY):
     st.markdown(
         """
         <style>
-        .spotify-title {
+        .title {
             text-align: center;
             font-size: 3rem;
             font-weight: 800;
             margin-top: 4rem;
-            margin-bottom: 1rem;
         }
 
-        .spotify-description {
+        .subtitle {
             text-align: center;
-            max-width: 700px;
-            margin: auto;
+            max-width: 750px;
+            margin: 1rem auto 2rem auto;
             font-size: 1.1rem;
         }
         </style>
@@ -268,26 +685,23 @@ if not st.session_state.get(TOKEN_KEY):
     )
 
     st.markdown(
-        '<div class="spotify-title">🎵 Spotify Auto-Mix</div>',
+        '<div class="title">🎵 Spotify Auto-Mix</div>',
         unsafe_allow_html=True,
     )
 
     st.markdown(
         """
-        <div class="spotify-description">
-            Organiza tus playlists y prepara mezclas más fluidas
-            utilizando información musical de tus canciones.
+        <div class="subtitle">
+            Convierte tus <b>Me gusta</b> de Spotify en una mezcla
+            organizada y también trabaja con tus playlists.
             <br><br>
-            Conecta tu cuenta de Spotify para comenzar.
+            Inicia sesión para cargar tu biblioteca.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.write("")
-    st.write("")
-
-    auth_url = login()
+    auth_url = get_spotify_auth_url()
 
     if auth_url:
 
@@ -297,9 +711,6 @@ if not st.session_state.get(TOKEN_KEY):
 
         with col2:
 
-            # IMPORTANTE:
-            # st.link_button utiliza directamente la URL externa.
-            # No crea una ruta interna de Streamlit.
             st.link_button(
                 "🎧 Iniciar sesión con Spotify",
                 auth_url,
@@ -316,7 +727,7 @@ if not st.session_state.get(TOKEN_KEY):
 
 
 # ============================================================
-# CONEXIÓN AUTENTICADA
+# CONEXIÓN
 # ============================================================
 
 sp = get_spotify_client()
@@ -324,12 +735,11 @@ sp = get_spotify_client()
 if sp is None:
 
     st.error(
-        "Tu sesión de Spotify no está disponible."
+        "La conexión con Spotify no está disponible."
     )
 
     if st.button(
-        "Volver a iniciar sesión",
-        type="primary",
+        "Volver a iniciar sesión"
     ):
         logout()
 
@@ -340,23 +750,10 @@ if sp is None:
 # PERFIL
 # ============================================================
 
-if PROFILE_KEY not in st.session_state:
+profile = load_profile(sp)
 
-    try:
-        st.session_state[PROFILE_KEY] = (
-            sp.current_user()
-        )
-
-    except Exception as e:
-
-        st.error(
-            "No se pudo obtener tu perfil de Spotify."
-        )
-        st.exception(e)
-        st.stop()
-
-
-profile = st.session_state[PROFILE_KEY]
+if not profile:
+    st.stop()
 
 display_name = (
     profile.get("display_name")
@@ -371,7 +768,7 @@ display_name = (
 
 with st.sidebar:
 
-    st.title("🎵 Spotify Auto-Mix")
+    st.title("🎵 Auto-Mix")
 
     st.write(
         f"👤 **{display_name}**"
@@ -393,449 +790,364 @@ with st.sidebar:
 st.title("🎵 Spotify Auto-Mix")
 
 st.write(
-    "Selecciona una playlist para analizar y organizar "
-    "sus canciones."
+    "Organiza tus canciones guardadas y crea una propuesta "
+    "de mezcla según sus características."
 )
 
 
 # ============================================================
-# CARGAR PLAYLISTS
+# FUENTE DE CANCIONES
 # ============================================================
 
-if PLAYLISTS_KEY not in st.session_state:
+source = st.radio(
+    "¿Qué quieres mezclar?",
+    [
+        "❤️ Mis Me gusta",
+        "📁 Una playlist",
+    ],
+    horizontal=True,
+)
 
-    try:
 
-        playlists = []
-        offset = 0
-        limit = 50
+tracks = []
 
-        while True:
 
-            response = sp.current_user_playlists(
-                limit=limit,
-                offset=offset,
-            )
+# ============================================================
+# MIS ME GUSTA
+# ============================================================
 
-            items = response.get(
-                "items",
-                []
-            )
+if source == "❤️ Mis Me gusta":
 
-            playlists.extend(items)
+    st.subheader("❤️ Mis Me gusta")
 
-            if not response.get("next"):
-                break
+    col1, col2 = st.columns(
+        [3, 1]
+    )
 
-            offset += limit
-
-        st.session_state[PLAYLISTS_KEY] = playlists
-
-    except Exception as e:
-
-        st.error(
-            "No se pudieron cargar tus playlists de Spotify."
+    with col1:
+        st.write(
+            "Usaremos las canciones que tienes guardadas "
+            "en tu biblioteca de Spotify."
         )
-        st.exception(e)
+
+    with col2:
+
+        if st.button(
+            "🔄 Actualizar",
+            use_container_width=True,
+        ):
+            tracks = load_liked_tracks(
+                sp,
+                force_reload=True,
+            )
+        else:
+            tracks = load_liked_tracks(
+                sp
+            )
+
+
+# ============================================================
+# PLAYLIST
+# ============================================================
+
+else:
+
+    st.subheader("📁 Mis playlists")
+
+    playlists = load_playlists(sp)
+
+    if not playlists:
+
+        st.warning(
+            "No tienes playlists disponibles."
+        )
         st.stop()
 
+    playlist_options = {}
 
-playlists = st.session_state[PLAYLISTS_KEY]
+    for playlist in playlists:
 
-
-if not playlists:
-
-    st.warning(
-        "No se encontraron playlists disponibles."
-    )
-    st.stop()
-
-
-# ============================================================
-# SELECTOR
-# ============================================================
-
-playlist_options = {}
-
-for playlist in playlists:
-
-    name = playlist.get(
-        "name",
-        "Sin nombre",
-    )
-
-    total = playlist.get(
-        "tracks",
-        {},
-    ).get(
-        "total",
-        0,
-    )
-
-    label = f"{name} ({total} canciones)"
-
-    playlist_options[label] = playlist
-
-
-selected_label = st.selectbox(
-    "Selecciona una playlist",
-    list(playlist_options.keys()),
-)
-
-
-selected_playlist = playlist_options[
-    selected_label
-]
-
-
-# ============================================================
-# INFORMACIÓN DE PLAYLIST
-# ============================================================
-
-st.divider()
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-
-    st.metric(
-        "Playlist",
-        selected_playlist.get(
+        name = playlist.get(
             "name",
             "Sin nombre",
+        )
+
+        playlist_id = playlist.get(
+            "id"
+        )
+
+        if not playlist_id:
+            continue
+
+        total = playlist.get(
+            "items",
+            playlist.get(
+                "tracks",
+                {}
+            )
+        )
+
+        if isinstance(total, dict):
+            total = total.get(
+                "total",
+                0
+            )
+        else:
+            total = 0
+
+        playlist_options[
+            f"{name} ({total} canciones)"
+        ] = playlist
+
+    selected_label = st.selectbox(
+        "Selecciona una playlist",
+        list(
+            playlist_options.keys()
         ),
     )
 
+    selected_playlist = playlist_options[
+        selected_label
+    ]
 
-with col2:
+    if st.button(
+        "📥 Cargar playlist",
+        type="primary",
+        use_container_width=True,
+    ):
 
-    total_tracks = selected_playlist.get(
-        "tracks",
-        {},
-    ).get(
-        "total",
-        0,
-    )
+        tracks = load_playlist_tracks(
+            sp,
+            selected_playlist["id"],
+        )
 
-    st.metric(
-        "Canciones",
-        total_tracks,
-    )
+        st.session_state[
+            "selected_playlist_tracks"
+        ] = tracks
 
+    else:
 
-with col3:
-
-    owner = selected_playlist.get(
-        "owner",
-        {},
-    ).get(
-        "display_name",
-        "Desconocido",
-    )
-
-    st.metric(
-        "Propietario",
-        owner,
-    )
-
-
-# ============================================================
-# OPCIONES DE MEZCLA
-# ============================================================
-
-st.subheader("⚙️ Opciones de mezcla")
-
-strategy = st.selectbox(
-    "Ordenar canciones por",
-    [
-        "Energía",
-        "BPM",
-        "Bailabilidad",
-        "Ánimo",
-    ],
-)
-
-
-# ============================================================
-# ANALIZAR
-# ============================================================
-
-if st.button(
-    "🔎 Analizar playlist",
-    type="primary",
-    use_container_width=True,
-):
-
-    try:
-
-        with st.spinner(
-            "Cargando canciones..."
-        ):
-
-            tracks = []
-            offset = 0
-            limit = 100
-
-            while True:
-
-                response = sp.playlist_items(
-                    selected_playlist["id"],
-                    limit=limit,
-                    offset=offset,
-                )
-
-                items = response.get(
-                    "items",
-                    []
-                )
-
-                for item in items:
-
-                    track = item.get("track")
-
-                    if (
-                        track
-                        and track.get("id")
-                        and track.get("type") == "track"
-                    ):
-                        tracks.append(track)
-
-                if not response.get("next"):
-                    break
-
-                offset += limit
-
-
-        if not tracks:
-
-            st.warning(
-                "No se encontraron canciones analizables."
-            )
-            st.stop()
-
-
-        st.success(
-            f"Se encontraron {len(tracks)} canciones."
+        tracks = st.session_state.get(
+            "selected_playlist_tracks",
+            []
         )
 
 
-        # ====================================================
-        # MÉTRICAS DE AUDIO
-        # ====================================================
+# ============================================================
+# INFORMACIÓN
+# ============================================================
+
+if tracks:
+
+    st.divider()
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "Canciones",
+            len(tracks),
+        )
+
+    with col2:
+        artists = {
+            track.get("artist")
+            for track in tracks
+            if track.get("artist")
+        }
+
+        st.metric(
+            "Artistas",
+            len(artists),
+        )
+
+    with col3:
+        total_minutes = (
+            sum(
+                (
+                    track.get(
+                        "duration_ms"
+                    )
+                    or 0
+                )
+                for track in tracks
+            )
+            / 60000
+        )
+
+        st.metric(
+            "Duración",
+            f"{total_minutes:.1f} min",
+        )
+
+
+# ============================================================
+# CONFIGURACIÓN DEL MIX
+# ============================================================
+
+if tracks:
+
+    st.divider()
+
+    st.subheader(
+        "🎚️ Configuración del Auto-Mix"
+    )
+
+    strategy = st.selectbox(
+        "Organizar por",
+        [
+            "Energía",
+            "BPM",
+            "Bailabilidad",
+            "Ánimo",
+            "Acústica",
+        ],
+    )
+
+    analyze = st.button(
+        "🔥 Crear Auto-Mix",
+        type="primary",
+        use_container_width=True,
+    )
+
+    if analyze:
 
         track_ids = [
-            track["id"]
+            track.get("id")
             for track in tracks
             if track.get("id")
         ]
 
-        audio_features = {}
-
         with st.spinner(
-            "Obteniendo métricas musicales..."
+            "Analizando tus canciones..."
         ):
 
-            # Spotify permite solicitar varias pistas por llamada.
-            for start in range(
-                0,
-                len(track_ids),
-                100,
-            ):
-
-                batch = track_ids[
-                    start:start + 100
-                ]
-
-                try:
-
-                    result = sp.audio_features(
-                        batch
-                    )
-
-                    if result:
-
-                        for feature in result:
-
-                            if feature:
-
-                                audio_features[
-                                    feature["id"]
-                                ] = feature
-
-                except Exception:
-                    # Una falla en un lote no rompe
-                    # todo el análisis.
-                    continue
-
-
-        # ====================================================
-        # CONSTRUIR RESULTADOS
-        # ====================================================
-
-        rows = []
-
-        for track in tracks:
-
-            track_id = track.get("id")
-
-            feature = audio_features.get(
-                track_id,
-                {},
+            audio_features = load_audio_features(
+                sp,
+                track_ids,
             )
 
-            artists = ", ".join(
-                artist.get(
+        mix_data = build_mix_data(
+            tracks,
+            audio_features,
+        )
+
+        ordered_mix = sort_for_mix(
+            mix_data,
+            strategy,
+        )
+
+        st.session_state[
+            MIX_DATA_KEY
+        ] = ordered_mix
+
+        if not audio_features:
+
+            st.warning(
+                "Spotify no proporcionó métricas de audio "
+                "para estas canciones. Se muestran las canciones "
+                "cargadas, pero el orden musical no pudo calcularse."
+            )
+
+        elif len(audio_features) < len(track_ids):
+
+            st.warning(
+                f"Spotify proporcionó métricas para "
+                f"{len(audio_features)} de {len(track_ids)} canciones."
+            )
+
+
+# ============================================================
+# MOSTRAR AUTO-MIX
+# ============================================================
+
+mix_data = st.session_state.get(
+    MIX_DATA_KEY,
+    []
+)
+
+if mix_data:
+
+    st.divider()
+
+    st.subheader(
+        f"🔥 Auto-Mix ordenado por {strategy}"
+    )
+
+    rows = []
+
+    for index, track in enumerate(
+        mix_data,
+        start=1,
+    ):
+
+        rows.append(
+            {
+                "#": index,
+                "Canción": track.get(
                     "name",
+                    "Sin nombre",
+                ),
+                "Artista": track.get(
+                    "artist",
                     "Desconocido",
-                )
-                for artist in track.get(
-                    "artists",
-                    [],
-                )
-            )
-
-            rows.append(
-                {
-                    "Canción": track.get(
-                        "name",
-                        "Sin nombre",
-                    ),
-                    "Artista": artists,
-                    "Energía": feature.get(
+                ),
+                "Álbum": track.get(
+                    "album",
+                    "Sin álbum",
+                ),
+                "Energía": (
+                    round(
+                        track["energy"],
+                        3,
+                    )
+                    if track.get(
                         "energy"
-                    ),
-                    "Bailabilidad": feature.get(
+                    ) is not None
+                    else None
+                ),
+                "Bailabilidad": (
+                    round(
+                        track["danceability"],
+                        3,
+                    )
+                    if track.get(
                         "danceability"
-                    ),
-                    "BPM": feature.get(
+                    ) is not None
+                    else None
+                ),
+                "BPM": (
+                    round(
+                        track["tempo"],
+                        1,
+                    )
+                    if track.get(
                         "tempo"
-                    ),
-                    "Ánimo": feature.get(
+                    ) is not None
+                    else None
+                ),
+                "Ánimo": (
+                    round(
+                        track["valence"],
+                        3,
+                    )
+                    if track.get(
                         "valence"
-                    ),
-                    "URI": track.get(
-                        "uri"
-                    ),
-                }
-            )
-
-
-        # ====================================================
-        # ORDENAMIENTO
-        # ====================================================
-
-        if strategy == "Energía":
-
-            rows.sort(
-                key=lambda x: (
-                    x["Energía"]
-                    if x["Energía"] is not None
-                    else -1
-                )
-            )
-
-        elif strategy == "BPM":
-
-            rows.sort(
-                key=lambda x: (
-                    x["BPM"]
-                    if x["BPM"] is not None
-                    else -1
-                )
-            )
-
-        elif strategy == "Bailabilidad":
-
-            rows.sort(
-                key=lambda x: (
-                    x["Bailabilidad"]
-                    if x["Bailabilidad"] is not None
-                    else -1
-                )
-            )
-
-        elif strategy == "Ánimo":
-
-            rows.sort(
-                key=lambda x: (
-                    x["Ánimo"]
-                    if x["Ánimo"] is not None
-                    else -1
-                )
-            )
-
-
-        # ====================================================
-        # MOSTRAR RESULTADOS
-        # ====================================================
-
-        st.divider()
-
-        st.subheader(
-            f"🎚️ Orden sugerido por {strategy}"
+                    ) is not None
+                    else None
+                ),
+            }
         )
 
-        st.caption(
-            "Este análisis solamente organiza los resultados "
-            "y no modifica automáticamente tu playlist."
-        )
+    st.dataframe(
+        rows,
+        use_container_width=True,
+        hide_index=True,
+    )
 
-        display_rows = []
-
-        for index, row in enumerate(
-            rows,
-            start=1,
-        ):
-
-            display_rows.append(
-                {
-                    "#": index,
-                    "Canción": row["Canción"],
-                    "Artista": row["Artista"],
-                    "Energía": (
-                        round(row["Energía"], 3)
-                        if row["Energía"] is not None
-                        else None
-                    ),
-                    "Bailabilidad": (
-                        round(row["Bailabilidad"], 3)
-                        if row["Bailabilidad"] is not None
-                        else None
-                    ),
-                    "BPM": (
-                        round(row["BPM"], 1)
-                        if row["BPM"] is not None
-                        else None
-                    ),
-                    "Ánimo": (
-                        round(row["Ánimo"], 3)
-                        if row["Ánimo"] is not None
-                        else None
-                    ),
-                }
-            )
-
-
-        st.dataframe(
-            display_rows,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-
-    except Exception as e:
-
-        st.error(
-            "Ocurrió un error al analizar la playlist. "
-            "La aplicación sigue funcionando."
-        )
-
-        st.exception(e)
-
-
-# ============================================================
-# PIE
-# ============================================================
+    st.success(
+        f"Auto-Mix preparado con {len(mix_data)} canciones."
+    )
 
 st.divider()
 
