@@ -1,4 +1,4 @@
-import random
+ import random
 import time
 from collections import Counter, defaultdict
 from urllib.parse import urlparse
@@ -7,6 +7,10 @@ import requests
 import streamlit as st
 from spotipy.oauth2 import SpotifyOAuth
 
+
+# ============================================================
+# CONFIGURACIÓN DE STREAMLIT
+# ============================================================
 
 st.set_page_config(
     page_title="Spotify Auto-Mix DJ",
@@ -35,7 +39,7 @@ ARTIST_GENRES_KEY = "spotify_artist_genres"
 ENRICHED_KEY = "spotify_enriched_tracks"
 CREATED_KEY = "spotify_created_playlists"
 
-# Géneros base indicados por el usuario.
+# Tus categorías.
 USER_GENRES = [
     "Reggaeton",
     "Latin",
@@ -55,80 +59,11 @@ USER_GENRES = [
 
 
 # ============================================================
-# MAPEO DE GÉNEROS
-# ============================================================
-
-GENRE_ALIASES = {
-    "reggaeton": "Reggaeton",
-    "reggaetón": "Reggaeton",
-    "perreo": "Reggaeton",
-    "urbano": "Reggaeton",
-
-    "latin": "Latin",
-    "latin music": "Latin",
-    "latin pop": "Latin",
-    "latin alternative": "Latin",
-    "bachata": "Latin",
-
-    "pop rock": "Pop Rock",
-    "pop-rock": "Pop Rock",
-
-    "cumbia": "Cumbia",
-    "cumbia villera": "Cumbia",
-    "cumbia pop": "Cumbia",
-
-    "hip hop": "Hip Hop",
-    "hip-hop": "Hip Hop",
-    "rap": "Hip Hop",
-    "trap": "Hip Hop",
-
-    "romantic": "Romantic",
-    "romantic ballads": "Romantic",
-    "balada": "Romantic",
-    "ballad": "Romantic",
-
-    "salsa": "Salsa",
-    "salsa romantica": "Salsa",
-
-    "dance": "Dance",
-    "dance pop": "Dance",
-    "edm": "Dance",
-    "electronic": "Dance",
-    "electropop": "Dance",
-
-    "rock": "Rock",
-    "alternative rock": "Rock",
-    "indie rock": "Rock",
-    "classic rock": "Rock",
-    "hard rock": "Rock",
-    "soft rock": "Rock",
-
-    "norteno": "Norteño",
-    "norteño": "Norteño",
-    "regional mexican": "Norteño",
-    "regional mexicano": "Norteño",
-
-    "bolero": "Bolero",
-
-    "relaxing": "Relaxing",
-    "relax": "Relaxing",
-    "ambient": "Relaxing",
-    "chill": "Relaxing",
-    "chillout": "Relaxing",
-    "downtempo": "Relaxing",
-
-    "pump up": "Pump Up",
-    "workout": "Pump Up",
-    "gym": "Pump Up",
-    "fitness": "Pump Up",
-
-    "reggae": "Reggae spooky",
-    "reggae spooky": "Reggae spooky",
-}
-
-
-# ============================================================
 # TRANSICIONES
+# ============================================================
+# No es un orden obligatorio.
+# Es una red de posibles cambios para que el DJ pueda
+# cambiar de ambiente sin hacer saltos absurdos todo el tiempo.
 # ============================================================
 
 GENRE_TRANSITIONS = {
@@ -138,6 +73,7 @@ GENRE_TRANSITIONS = {
         "Dance",
         "Hip Hop",
         "Salsa",
+        "Pump Up",
         "Romantic",
     ],
 
@@ -157,6 +93,7 @@ GENRE_TRANSITIONS = {
         "Hip Hop",
         "Romantic",
         "Dance",
+        "Reggaeton",
     ],
 
     "cumbia": [
@@ -165,6 +102,7 @@ GENRE_TRANSITIONS = {
         "Reggaeton",
         "Norteño",
         "Romantic",
+        "Dance",
     ],
 
     "hip hop": [
@@ -181,6 +119,7 @@ GENRE_TRANSITIONS = {
         "Relaxing",
         "Pop Rock",
         "Cumbia",
+        "Salsa",
     ],
 
     "salsa": [
@@ -248,27 +187,86 @@ GENRE_TRANSITIONS = {
 
 
 # ============================================================
-# ESTILO DE SESIÓN
+# ALIASES
+# ============================================================
+
+GENRE_ALIASES = {
+    "reggaeton": "Reggaeton",
+    "reggaetón": "Reggaeton",
+    "perreo": "Reggaeton",
+    "urbano": "Reggaeton",
+    "latin": "Latin",
+    "latin music": "Latin",
+    "latin pop": "Latin",
+    "bachata": "Latin",
+    "pop rock": "Pop Rock",
+    "pop-rock": "Pop Rock",
+    "cumbia": "Cumbia",
+    "cumbia villera": "Cumbia",
+    "cumbia pop": "Cumbia",
+    "hip hop": "Hip Hop",
+    "hip-hop": "Hip Hop",
+    "rap": "Hip Hop",
+    "trap": "Hip Hop",
+    "romantic": "Romantic",
+    "romantic ballads": "Romantic",
+    "balada": "Romantic",
+    "ballad": "Romantic",
+    "salsa": "Salsa",
+    "salsa romantica": "Salsa",
+    "dance": "Dance",
+    "dance pop": "Dance",
+    "edm": "Dance",
+    "electronic": "Dance",
+    "electropop": "Dance",
+    "rock": "Rock",
+    "alternative rock": "Rock",
+    "indie rock": "Rock",
+    "classic rock": "Rock",
+    "hard rock": "Rock",
+    "soft rock": "Rock",
+    "norteno": "Norteño",
+    "norteño": "Norteño",
+    "regional mexican": "Norteño",
+    "regional mexicano": "Norteño",
+    "bolero": "Bolero",
+    "relaxing": "Relaxing",
+    "relax": "Relaxing",
+    "ambient": "Relaxing",
+    "chill": "Relaxing",
+    "chillout": "Relaxing",
+    "downtempo": "Relaxing",
+    "pump up": "Pump Up",
+    "workout": "Pump Up",
+    "gym": "Pump Up",
+    "fitness": "Pump Up",
+    "reggae": "Reggae spooky",
+    "reggae spooky": "Reggae spooky",
+}
+
+
+# ============================================================
+# MODOS
 # ============================================================
 
 SESSION_MODES = {
     "DJ Profesional": {
-        "name_prefix": "Auto-Mix DJ",
+        "prefix": "Auto-Mix DJ",
         "min_block": 3,
         "max_block": 6,
     },
     "Tarde": {
-        "name_prefix": "Auto-Mix Tarde",
+        "prefix": "Auto-Mix Tarde",
         "min_block": 4,
         "max_block": 7,
     },
     "Manejo": {
-        "name_prefix": "Auto-Mix Manejo",
+        "prefix": "Auto-Mix Manejo",
         "min_block": 4,
         "max_block": 7,
     },
     "Fiesta": {
-        "name_prefix": "Auto-Mix Fiesta",
+        "prefix": "Auto-Mix Fiesta",
         "min_block": 3,
         "max_block": 5,
     },
@@ -276,7 +274,20 @@ SESSION_MODES = {
 
 
 # ============================================================
-# SPOTIFY OAUTH
+# EXCEPCIONES
+# ============================================================
+
+class SpotifyRateLimit(Exception):
+    def __init__(self, retry_after=30):
+        self.retry_after = retry_after
+        super().__init__(
+            f"Spotify limitó temporalmente las peticiones. "
+            f"Espera aproximadamente {retry_after} segundos."
+        )
+
+
+# ============================================================
+# OAUTH
 # ============================================================
 
 def create_oauth():
@@ -287,7 +298,7 @@ def create_oauth():
 
         if not client_id or not client_secret or not redirect_uri:
             raise ValueError(
-                "Faltan credenciales de Spotify en Secrets."
+                "Faltan las credenciales de Spotify."
             )
 
         return SpotifyOAuth(
@@ -302,7 +313,7 @@ def create_oauth():
 
     except Exception as exc:
         st.error(
-            "No se pudo configurar la autenticación de Spotify."
+            "No se pudo configurar la autenticación."
         )
         st.exception(exc)
         return None
@@ -315,20 +326,20 @@ def get_authorize_url():
         if oauth is None:
             return None
 
-        auth_url = oauth.get_authorize_url()
-        parsed = urlparse(auth_url)
+        url = oauth.get_authorize_url()
+        parsed = urlparse(url)
 
         if parsed.scheme != "https":
             raise ValueError(
-                "Spotify generó una URL que no utiliza HTTPS."
+                "La URL OAuth no usa HTTPS."
             )
 
         if parsed.netloc != "accounts.spotify.com":
             raise ValueError(
-                "La URL generada no pertenece a Spotify."
+                "La URL OAuth no pertenece a Spotify."
             )
 
-        return auth_url
+        return url
 
     except Exception as exc:
         st.error(
@@ -366,12 +377,12 @@ def process_callback():
 
         if not token_info:
             raise ValueError(
-                "Spotify no devolvió información del token."
+                "Spotify no devolvió un token."
             )
 
         if not token_info.get("access_token"):
             raise ValueError(
-                "Spotify no devolvió un access_token."
+                "No se recibió access_token."
             )
 
         st.session_state[TOKEN_KEY] = token_info
@@ -387,189 +398,7 @@ def process_callback():
 
 
 # ============================================================
-# TOKEN
-# ============================================================
-
-def get_token():
-    token_info = st.session_state.get(TOKEN_KEY)
-
-    if not token_info:
-        return None
-
-    try:
-        oauth = create_oauth()
-
-        if oauth is None:
-            return None
-
-        if oauth.is_token_expired(token_info):
-            refresh_token = token_info.get("refresh_token")
-
-            if not refresh_token:
-                raise ValueError(
-                    "La sesión expiró y no existe refresh token."
-                )
-
-            token_info = oauth.refresh_access_token(
-                refresh_token
-            )
-
-            st.session_state[TOKEN_KEY] = token_info
-
-        return token_info.get("access_token")
-
-    except Exception as exc:
-        st.error(
-            "No se pudo renovar tu sesión de Spotify."
-        )
-        st.exception(exc)
-
-        clear_session()
-        return None
-
-
-# ============================================================
-# PETICIONES CON BACKOFF
-# ============================================================
-
-def spotify_request(
-    method,
-    endpoint,
-    token,
-    params=None,
-    json_data=None,
-    max_retries=5,
-):
-    url = f"{SPOTIFY_API}{endpoint}"
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-
-    for attempt in range(max_retries):
-
-        try:
-            response = requests.request(
-                method=method,
-                url=url,
-                headers=headers,
-                params=params,
-                json=json_data,
-                timeout=30,
-            )
-
-        except requests.RequestException as exc:
-
-            if attempt >= max_retries - 1:
-                raise RuntimeError(
-                    f"Error de conexión con Spotify: {exc}"
-                )
-
-            time.sleep(
-                min(
-                    2 ** attempt,
-                    8,
-                )
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # RATE LIMIT
-        # ----------------------------------------------------
-
-        if response.status_code == 429:
-
-            retry_after = response.headers.get(
-                "Retry-After",
-                "5",
-            )
-
-            try:
-                wait_seconds = int(
-                    float(retry_after)
-                )
-            except ValueError:
-                wait_seconds = 5
-
-            wait_seconds = max(
-                1,
-                min(
-                    wait_seconds,
-                    30,
-                ),
-            )
-
-            if attempt >= max_retries - 1:
-                raise RuntimeError(
-                    "Spotify está limitando las peticiones. "
-                    "Espera unos segundos antes de volver a generar "
-                    "el Auto-Mix."
-                )
-
-            st.warning(
-                f"Spotify está limitando temporalmente las peticiones. "
-                f"Reintentando en {wait_seconds} segundos..."
-            )
-
-            time.sleep(wait_seconds)
-            continue
-
-        # ----------------------------------------------------
-        # ERRORES DE SERVIDOR
-        # ----------------------------------------------------
-
-        if response.status_code >= 500:
-
-            if attempt >= max_retries - 1:
-                raise RuntimeError(
-                    f"Spotify devolvió un error {response.status_code}."
-                )
-
-            time.sleep(
-                min(
-                    2 ** attempt,
-                    8,
-                )
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # OTROS ERRORES
-        # ----------------------------------------------------
-
-        if response.status_code >= 400:
-
-            try:
-                detail = response.json()
-            except Exception:
-                detail = response.text
-
-            raise RuntimeError(
-                f"Spotify API {response.status_code}: {detail}"
-            )
-
-        # ----------------------------------------------------
-        # RESPUESTA VACÍA
-        # ----------------------------------------------------
-
-        if not response.content:
-            return {}
-
-        try:
-            return response.json()
-        except ValueError:
-            return {}
-
-    raise RuntimeError(
-        "No fue posible completar la solicitud a Spotify."
-    )
-
-
-# ============================================================
-# LIMPIAR SESIÓN
+# SESIÓN
 # ============================================================
 
 def clear_session():
@@ -577,7 +406,6 @@ def clear_session():
         TOKEN_KEY,
         PROFILE_KEY,
         LIKED_KEY,
-        ARTIST_GENRES_KEY,
         ENRICHED_KEY,
         CREATED_KEY,
     ]:
@@ -588,7 +416,139 @@ def clear_session():
 
 def logout():
     clear_session()
+
+    # Conservamos el caché de artistas durante la vida
+    # de la aplicación, pero cerramos la sesión.
     st.rerun()
+
+
+def get_token():
+    token_info = st.session_state.get(
+        TOKEN_KEY
+    )
+
+    if not token_info:
+        return None
+
+    try:
+        oauth = create_oauth()
+
+        if oauth is None:
+            return None
+
+        if oauth.is_token_expired(
+            token_info
+        ):
+            refresh_token = token_info.get(
+                "refresh_token"
+            )
+
+            if not refresh_token:
+                clear_session()
+                return None
+
+            token_info = oauth.refresh_access_token(
+                refresh_token
+            )
+
+            st.session_state[
+                TOKEN_KEY
+            ] = token_info
+
+        return token_info.get(
+            "access_token"
+        )
+
+    except Exception as exc:
+        st.error(
+            "No se pudo renovar la sesión de Spotify."
+        )
+        st.exception(exc)
+
+        clear_session()
+        return None
+
+
+# ============================================================
+# API REQUEST
+# ============================================================
+
+def spotify_request(
+    method,
+    endpoint,
+    token,
+    params=None,
+    json_data=None,
+    timeout=25,
+):
+    url = f"{SPOTIFY_API}{endpoint}"
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.request(
+            method=method,
+            url=url,
+            headers=headers,
+            params=params,
+            json=json_data,
+            timeout=timeout,
+        )
+
+    except requests.Timeout:
+        raise RuntimeError(
+            "Spotify tardó demasiado en responder."
+        )
+
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"No se pudo conectar con Spotify: {exc}"
+        )
+
+    if response.status_code == 429:
+        retry_after = response.headers.get(
+            "Retry-After",
+            "30",
+        )
+
+        try:
+            retry_after = max(
+                1,
+                int(float(retry_after)),
+            )
+        except Exception:
+            retry_after = 30
+
+        raise SpotifyRateLimit(
+            retry_after
+        )
+
+    if response.status_code >= 500:
+        raise RuntimeError(
+            f"Spotify está devolviendo un error de servidor "
+            f"({response.status_code})."
+        )
+
+    if response.status_code >= 400:
+        try:
+            detail = response.json()
+        except Exception:
+            detail = response.text
+
+        raise RuntimeError(
+            f"Spotify API {response.status_code}: {detail}"
+        )
+
+    if not response.content:
+        return {}
+
+    try:
+        return response.json()
+    except ValueError:
+        return {}
 
 
 # ============================================================
@@ -605,12 +565,15 @@ def load_profile(token):
         token,
     )
 
-    st.session_state[PROFILE_KEY] = profile
+    st.session_state[
+        PROFILE_KEY
+    ] = profile
+
     return profile
 
 
 # ============================================================
-# MIS ME GUSTA
+# CARGAR MIS ME GUSTA
 # ============================================================
 
 def load_liked_tracks(
@@ -621,7 +584,9 @@ def load_liked_tracks(
         LIKED_KEY in st.session_state
         and not force_reload
     ):
-        return st.session_state[LIKED_KEY]
+        return st.session_state[
+            LIKED_KEY
+        ]
 
     tracks = []
 
@@ -631,161 +596,294 @@ def load_liked_tracks(
     progress = st.progress(0)
     status = st.empty()
 
-    while True:
+    try:
 
-        response = spotify_request(
-            "GET",
-            "/me/tracks",
-            token,
-            params={
-                "limit": limit,
-                "offset": offset,
-            },
-        )
+        while True:
 
-        items = response.get(
-            "items",
-            [],
-        )
+            response = spotify_request(
+                "GET",
+                "/me/tracks",
+                token,
+                params={
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
 
-        for item in items:
-
-            track = item.get("track")
-
-            if not track:
-                continue
-
-            if track.get("type") != "track":
-                continue
-
-            track_id = track.get("id")
-
-            if not track_id:
-                continue
-
-            artists = track.get(
-                "artists",
+            items = response.get(
+                "items",
                 [],
             )
 
-            tracks.append(
-                {
-                    "id": track_id,
-                    "uri": track.get("uri"),
-                    "name": track.get(
+            for item in items:
+
+                track = item.get(
+                    "track"
+                )
+
+                if not track:
+                    continue
+
+                if track.get(
+                    "type"
+                ) != "track":
+                    continue
+
+                track_id = track.get(
+                    "id"
+                )
+
+                if not track_id:
+                    continue
+
+                artists = track.get(
+                    "artists",
+                    [],
+                )
+
+                artist_ids = [
+                    artist.get("id")
+                    for artist in artists
+                    if artist.get("id")
+                ]
+
+                artist_names = [
+                    artist.get(
                         "name",
-                        "Sin nombre",
-                    ),
-                    "artist_ids": [
-                        artist.get("id")
-                        for artist in artists
-                        if artist.get("id")
-                    ],
-                    "artists": [
-                        artist.get(
+                        "Desconocido",
+                    )
+                    for artist in artists
+                ]
+
+                tracks.append(
+                    {
+                        "id": track_id,
+                        "uri": track.get(
+                            "uri"
+                        ),
+                        "name": track.get(
                             "name",
-                            "Desconocido",
-                        )
-                        for artist in artists
-                    ],
-                    "album": track.get(
-                        "album",
-                        {},
-                    ).get(
-                        "name",
-                        "Sin álbum",
-                    ),
-                    "duration_ms": track.get(
-                        "duration_ms",
-                        0,
-                    ),
-                    "explicit": bool(
-                        track.get(
-                            "explicit",
-                            False,
-                        )
-                    ),
-                }
+                            "Sin nombre",
+                        ),
+                        "artist_ids": artist_ids,
+                        "artists": artist_names,
+                        "album": track.get(
+                            "album",
+                            {},
+                        ).get(
+                            "name",
+                            "Sin álbum",
+                        ),
+                        "duration_ms": track.get(
+                            "duration_ms",
+                            0,
+                        ),
+                    }
+                )
+
+            total = response.get(
+                "total",
+                len(tracks),
             )
 
-        total = response.get(
-            "total",
-            len(tracks),
-        )
-
-        progress.progress(
-            min(
-                len(tracks) / max(total, 1),
-                1.0,
+            progress.progress(
+                min(
+                    len(tracks)
+                    / max(total, 1),
+                    1.0,
+                )
             )
-        )
 
-        status.write(
-            f"Cargando Me gusta: "
-            f"{len(tracks)} canciones..."
-        )
+            status.write(
+                f"Cargando Mis Me gusta: "
+                f"{len(tracks)} / {total}"
+            )
 
-        if not response.get("next"):
-            break
+            if not response.get(
+                "next"
+            ):
+                break
 
-        offset += limit
+            offset += limit
 
-    progress.empty()
-    status.empty()
+            # Evita una ráfaga innecesaria de llamadas.
+            time.sleep(0.15)
 
-    # Eliminamos duplicados por ID.
+    except SpotifyRateLimit as exc:
+
+        progress.empty()
+        status.empty()
+
+        if tracks:
+            st.warning(
+                f"Spotify limitó temporalmente la carga. "
+                f"Se pudieron cargar {len(tracks)} canciones. "
+                f"Espera aproximadamente {exc.retry_after} segundos "
+                f"antes de actualizar nuevamente."
+            )
+        else:
+            raise
+
+    finally:
+        progress.empty()
+        status.empty()
+
     unique = {}
+
     for track in tracks:
-        unique[track["id"]] = track
+        unique[
+            track["id"]
+        ] = track
 
     tracks = list(
         unique.values()
     )
 
-    st.session_state[LIKED_KEY] = tracks
+    st.session_state[
+        LIKED_KEY
+    ] = tracks
 
     return tracks
 
 
 # ============================================================
-# GÉNEROS DE ARTISTAS
+# CACHE DE ARTISTAS
 # ============================================================
 
-def get_artist_genres(
-    token,
-    artist_id,
-):
-    cache = st.session_state.setdefault(
+def get_artist_cache():
+    return st.session_state.setdefault(
         ARTIST_GENRES_KEY,
         {},
     )
 
-    if artist_id in cache:
-        return cache[artist_id]
 
-    try:
+def scan_artist_genres(
+    tracks,
+    token,
+    max_new_artists=20,
+):
+    """
+    IMPORTANTE:
+    Ya no intenta consultar los cientos de artistas
+    de una biblioteca completa.
 
-        artist = spotify_request(
-            "GET",
-            f"/artists/{artist_id}",
-            token,
+    Analiza únicamente una pequeña cantidad de artistas
+    nuevos por ejecución y conserva los resultados.
+    """
+
+    cache = get_artist_cache()
+
+    artist_ids = []
+
+    for track in tracks:
+
+        for artist_id in track.get(
+            "artist_ids",
+            [],
+        ):
+
+            if artist_id not in cache:
+                artist_ids.append(
+                    artist_id
+                )
+
+    # Sin duplicados.
+    artist_ids = list(
+        dict.fromkeys(
+            artist_ids
+        )
+    )
+
+    # Límite intencional para evitar 429.
+    artist_ids = artist_ids[
+        :max_new_artists
+    ]
+
+    if not artist_ids:
+        return cache, 0, False
+
+    scanned = 0
+    rate_limited = False
+
+    progress = st.progress(0)
+    status = st.empty()
+
+    for index, artist_id in enumerate(
+        artist_ids,
+        start=1,
+    ):
+
+        status.write(
+            f"Analizando información musical: "
+            f"{index}/{len(artist_ids)}"
         )
 
-        genres = artist.get(
-            "genres",
-            [],
-        ) or []
+        try:
 
-        cache[artist_id] = genres
+            artist = spotify_request(
+                "GET",
+                f"/artists/{artist_id}",
+                token,
+            )
 
-        # Pausa muy pequeña para evitar ráfagas.
-        time.sleep(0.15)
+            genres = artist.get(
+                "genres",
+                [],
+            ) or []
 
-        return genres
+            cache[
+                artist_id
+            ] = genres
 
-    except Exception:
-        cache[artist_id] = []
-        return []
+            scanned += 1
+
+            progress.progress(
+                index / len(artist_ids)
+            )
+
+            # Separación intencional entre peticiones.
+            # No hacer 20 requests instantáneos.
+            time.sleep(0.8)
+
+        except SpotifyRateLimit:
+
+            rate_limited = True
+
+            cache.setdefault(
+                artist_id,
+                [],
+            )
+
+            break
+
+        except Exception:
+
+            # No dejar que un artista malo
+            # rompa todo el análisis.
+            cache.setdefault(
+                artist_id,
+                [],
+            )
+
+            scanned += 1
+
+            progress.progress(
+                index / len(artist_ids)
+            )
+
+            time.sleep(0.5)
+
+    progress.empty()
+    status.empty()
+
+    if rate_limited:
+        st.warning(
+            "Spotify limitó temporalmente el análisis de artistas. "
+            "La aplicación continuará usando los géneros ya guardados "
+            "y reglas locales para no quedarse bloqueada."
+        )
+
+    return cache, scanned, rate_limited
 
 
 # ============================================================
@@ -824,11 +922,11 @@ def normalize_genre(raw_genre):
 
 def infer_genre(
     track,
-    spotify_genres,
+    artist_genres,
 ):
     detected = []
 
-    for raw_genre in spotify_genres:
+    for raw_genre in artist_genres:
 
         mapped = normalize_genre(
             raw_genre
@@ -845,10 +943,19 @@ def infer_genre(
             detected
         )
 
-        return counts.most_common(1)[0][0]
+        return counts.most_common(
+            1
+        )[0][0]
+
+    # --------------------------------------------------------
+    # Fallback local.
+    # --------------------------------------------------------
 
     combined = normalize_text(
-        track.get("name", "")
+        track.get(
+            "name",
+            "",
+        )
         + " "
         + " ".join(
             track.get(
@@ -858,29 +965,27 @@ def infer_genre(
         )
     )
 
-    fallback_rules = [
+    rules = [
         (
             [
                 "reggaeton",
                 "reggaetón",
                 "perreo",
+                "urbano",
             ],
             "Reggaeton",
         ),
         (
-            ["cumbia"],
+            [
+                "cumbia",
+            ],
             "Cumbia",
         ),
         (
-            ["salsa"],
-            "Salsa",
-        ),
-        (
             [
-                "bachata",
-                "latin",
+                "salsa",
             ],
-            "Latin",
+            "Salsa",
         ),
         (
             [
@@ -892,6 +997,7 @@ def infer_genre(
             [
                 "norteno",
                 "norteño",
+                "regional mexicano",
             ],
             "Norteño",
         ),
@@ -911,7 +1017,6 @@ def infer_genre(
             [
                 "rap",
                 "hip hop",
-                "hip-hop",
                 "trap",
             ],
             "Hip Hop",
@@ -920,8 +1025,15 @@ def infer_genre(
             [
                 "dance",
                 "edm",
+                "electronic",
             ],
             "Dance",
+        ),
+        (
+            [
+                "reggae",
+            ],
+            "Reggae spooky",
         ),
         (
             [
@@ -933,13 +1045,15 @@ def infer_genre(
         ),
         (
             [
-                "reggae",
+                "romantic",
+                "balada",
+                "love",
             ],
-            "Reggae spooky",
+            "Romantic",
         ),
     ]
 
-    for keywords, genre in fallback_rules:
+    for keywords, genre in rules:
 
         if any(
             keyword in combined
@@ -947,94 +1061,53 @@ def infer_genre(
         ):
             return genre
 
-    return "Latin"
+    # Fallback distribuido para no colocar
+    # todas las canciones desconocidas siempre
+    # en la misma categoría.
+    possible = [
+        "Latin",
+        "Pop Rock",
+        "Rock",
+        "Romantic",
+        "Cumbia",
+    ]
+
+    # Determinista según el ID para que no cambie
+    # en cada rerun.
+    number = sum(
+        ord(char)
+        for char in track.get(
+            "id",
+            "",
+        )
+    )
+
+    return possible[
+        number % len(possible)
+    ]
 
 
 # ============================================================
-# ENRIQUECER CANCIONES
+# ENRIQUECER
 # ============================================================
 
 def enrich_tracks(
     tracks,
     token,
-    force_reload=False,
 ):
-    if (
-        ENRICHED_KEY in st.session_state
-        and not force_reload
-    ):
-        return st.session_state[
-            ENRICHED_KEY
-        ]
+    """
+    Usa primero los géneros guardados.
+    Solo intenta descubrir un número pequeño de artistas
+    que todavía no estén en caché.
+    """
 
-    # --------------------------------------------------------
-    # Artistas únicos
-    # --------------------------------------------------------
+    cache = get_artist_cache()
 
-    artist_ids = []
-
-    seen_artists = set()
-
-    for track in tracks:
-
-        for artist_id in track.get(
-            "artist_ids",
-            [],
-        ):
-
-            if artist_id not in seen_artists:
-
-                seen_artists.add(
-                    artist_id
-                )
-
-                artist_ids.append(
-                    artist_id
-                )
-
-    artist_genres = {}
-
-    total_artists = len(
-        artist_ids
+    scan_artist_genres(
+        tracks,
+        token,
+        max_new_artists=20,
     )
-
-    progress = st.progress(0)
-    status = st.empty()
-
-    # --------------------------------------------------------
-    # Solamente una consulta por artista.
-    # --------------------------------------------------------
-
-    for index, artist_id in enumerate(
-        artist_ids,
-        start=1,
-    ):
-
-        status.write(
-            f"Analizando artistas: "
-            f"{index}/{total_artists}"
-        )
-
-        artist_genres[artist_id] = (
-            get_artist_genres(
-                token,
-                artist_id,
-            )
-        )
-
-        progress.progress(
-            index / max(
-                total_artists,
-                1,
-            )
-        )
-
-    progress.empty()
-    status.empty()
-
-    # --------------------------------------------------------
-    # Clasificar canciones.
-    # --------------------------------------------------------
 
     enriched = []
 
@@ -1048,7 +1121,7 @@ def enrich_tracks(
         ):
 
             genres.extend(
-                artist_genres.get(
+                cache.get(
                     artist_id,
                     [],
                 )
@@ -1064,7 +1137,7 @@ def enrich_tracks(
         )
 
         item["genre"] = genre
-        item["genres_raw"] = genres
+        item["spotify_genres"] = genres
 
         enriched.append(
             item
@@ -1081,7 +1154,7 @@ def enrich_tracks(
 # AGRUPAR
 # ============================================================
 
-def group_tracks_by_genre(
+def group_by_genre(
     tracks
 ):
     groups = defaultdict(list)
@@ -1101,92 +1174,81 @@ def group_tracks_by_genre(
 
 
 # ============================================================
-# PUNTUACIÓN DE TRANSICIÓN
+# SCORE DE TRANSICIÓN
 # ============================================================
 
 def transition_score(
     previous,
     candidate,
-    current_genre,
 ):
     if previous is None:
-        return 0.0
+        return 0
 
     score = 0.0
 
-    previous_genre = normalize_text(
+    prev_genre = normalize_text(
         previous.get(
             "genre",
             "",
         )
     )
 
-    candidate_genre = normalize_text(
+    cand_genre = normalize_text(
         candidate.get(
             "genre",
             "",
         )
     )
 
-    # --------------------------------------------------------
-    # Mismo género
-    # --------------------------------------------------------
+    # Mismo género:
+    if prev_genre == cand_genre:
+        score += 5
 
-    if previous_genre == candidate_genre:
-        score += 5.0
-
-    # --------------------------------------------------------
-    # Género compatible
-    # --------------------------------------------------------
-
-    possible_transitions = [
+    # Transición conocida:
+    possible = [
         normalize_text(
-            item
+            genre
         )
-        for item in GENRE_TRANSITIONS.get(
-            previous_genre,
+        for genre
+        in GENRE_TRANSITIONS.get(
+            prev_genre,
             [],
         )
     ]
 
-    if candidate_genre in possible_transitions:
-        score += 8.0
+    if cand_genre in possible:
+        score += 8
 
-    # --------------------------------------------------------
-    # Evitar mismo artista consecutivo
-    # --------------------------------------------------------
-
+    # Evitar mismo artista inmediatamente.
     previous_artists = {
         normalize_text(
             artist
         )
-        for artist in previous.get(
+        for artist
+        in previous.get(
             "artists",
             [],
         )
     }
 
-    candidate_artists = {
+    current_artists = {
         normalize_text(
             artist
         )
-        for artist in candidate.get(
+        for artist
+        in candidate.get(
             "artists",
             [],
         )
     }
 
-    if previous_artists & candidate_artists:
-        score -= 5.0
+    if previous_artists & current_artists:
+        score -= 6
     else:
-        score += 1.5
+        score += 2
 
-    # --------------------------------------------------------
-    # Duración parecida.
-    # No es BPM, pero ayuda a que el flujo no sea extraño.
-    # --------------------------------------------------------
-
-    previous_duration = (
+    # Duraciones parecidas.
+    prev_duration = (
         previous.get(
             "duration_ms",
             0,
@@ -1202,23 +1264,22 @@ def transition_score(
         or 0
     )
 
-    if previous_duration and candidate_duration:
+    if prev_duration and candidate_duration:
 
-        duration_difference = abs(
-            previous_duration
+        difference = abs(
+            prev_duration
             - candidate_duration
         ) / 1000
 
-        if duration_difference < 20:
-            score += 2.0
+        if difference < 30:
+            score += 2
 
-        elif duration_difference < 60:
-            score += 1.0
+        elif difference < 60:
+            score += 1
 
-        elif duration_difference > 180:
-            score -= 1.0
+        elif difference > 180:
+            score -= 1
 
-    # Pequeña variación para que dos sesiones no queden idénticas.
     score += random.uniform(
         -1.0,
         1.0,
@@ -1228,13 +1289,12 @@ def transition_score(
 
 
 # ============================================================
-# ELEGIR CANCIÓN
+# SIGUIENTE CANCIÓN
 # ============================================================
 
 def choose_next_track(
     candidates,
     previous,
-    current_genre,
 ):
     if not candidates:
         return None
@@ -1243,15 +1303,12 @@ def choose_next_track(
 
     for candidate in candidates:
 
-        score = transition_score(
-            previous,
-            candidate,
-            current_genre,
-        )
-
         scored.append(
             (
-                score,
+                transition_score(
+                    previous,
+                    candidate,
+                ),
                 candidate,
             )
         )
@@ -1261,11 +1318,9 @@ def choose_next_track(
         reverse=True,
     )
 
-    # Elegimos entre las mejores para no generar siempre
-    # exactamente la misma playlist.
     top = scored[
         :min(
-            5,
+            6,
             len(scored),
         )
     ]
@@ -1276,7 +1331,7 @@ def choose_next_track(
 
 
 # ============================================================
-# CAMBIO DE GÉNERO
+# SIGUIENTE GÉNERO
 # ============================================================
 
 def choose_next_genre(
@@ -1302,29 +1357,32 @@ def choose_next_genre(
     ]
 
     mapped = {
-        normalize_text(genre): genre
-        for genre in available_genres
+        normalize_text(
+            genre
+        ): genre
+        for genre
+        in available_genres
     }
 
     preferred_candidates = []
 
-    for genre_key in preferred:
+    for key in preferred:
 
-        if genre_key in mapped:
+        if key in mapped:
 
-            genre = mapped[
-                genre_key
+            candidate = mapped[
+                key
             ]
 
-            if genre != current_genre:
+            if candidate != current_genre:
                 preferred_candidates.append(
-                    genre
+                    candidate
                 )
 
-    # Evitar usar demasiado pronto un género reciente.
-    fresh_candidates = [
+    fresh = [
         genre
-        for genre in available_genres
+        for genre
+        in available_genres
         if genre not in recent_genres
         and genre != current_genre
     ]
@@ -1337,37 +1395,33 @@ def choose_next_genre(
 
     candidates.extend(
         genre
-        for genre in fresh_candidates
+        for genre in fresh
         if genre not in candidates
     )
 
     candidates.extend(
         genre
-        for genre in available_genres
-        if genre not in candidates
-        and genre != current_genre
+        for genre
+        in available_genres
+        if genre != current_genre
+        and genre not in candidates
     )
 
     if not candidates:
         return None
 
-    # Preferencia fuerte por transiciones compatibles.
     weights = []
 
     for genre in candidates:
 
         if genre in preferred_candidates:
-            weight = 5.0
+            weights.append(6)
 
-        elif genre in fresh_candidates:
-            weight = 2.5
+        elif genre in fresh:
+            weights.append(3)
 
         else:
-            weight = 1.0
-
-        weights.append(
-            weight
-        )
+            weights.append(1)
 
     return random.choices(
         candidates,
@@ -1377,7 +1431,7 @@ def choose_next_genre(
 
 
 # ============================================================
-# CREAR UNA SESIÓN DJ
+# CREAR SESIÓN DJ
 # ============================================================
 
 def create_dj_session(
@@ -1389,20 +1443,18 @@ def create_dj_session(
     if not tracks:
         return []
 
-    if len(tracks) <= songs_per_session:
-        return tracks[:]
-
     rng = random.Random(
         seed
     )
 
-    groups = group_tracks_by_genre(
+    groups = group_by_genre(
         tracks
     )
 
     available_genres = [
         genre
-        for genre, songs
+        for genre,
+        songs
         in groups.items()
         if songs
     ]
@@ -1410,36 +1462,41 @@ def create_dj_session(
     if not available_genres:
         return rng.sample(
             tracks,
-            songs_per_session,
+            min(
+                songs_per_session,
+                len(tracks),
+            ),
         )
 
-    # Preferir géneros con más variedad.
-    genre_weights = [
+    weights = [
         max(
             1,
             len(
                 groups[genre]
             ),
         )
-        for genre in available_genres
+        for genre
+        in available_genres
     ]
 
     current_genre = rng.choices(
         available_genres,
-        weights=genre_weights,
+        weights=weights,
         k=1,
     )[0]
 
-    mode_config = SESSION_MODES.get(
+    config = SESSION_MODES.get(
         mode,
-        SESSION_MODES["DJ Profesional"],
+        SESSION_MODES[
+            "DJ Profesional"
+        ],
     )
 
-    min_block = mode_config[
+    min_block = config[
         "min_block"
     ]
 
-    max_block = mode_config[
+    max_block = config[
         "max_block"
     ]
 
@@ -1469,7 +1526,7 @@ def create_dj_session(
 
         if not available_tracks:
 
-            possible_genres = [
+            alternatives = [
                 genre
                 for genre
                 in available_genres
@@ -1484,11 +1541,11 @@ def create_dj_session(
                 )
             ]
 
-            if not possible_genres:
+            if not alternatives:
                 break
 
             current_genre = rng.choice(
-                possible_genres
+                alternatives
             )
 
             available_tracks = [
@@ -1511,7 +1568,10 @@ def create_dj_session(
             block_size
         ):
 
-            if len(session) >= songs_per_session:
+            if (
+                len(session)
+                >= songs_per_session
+            ):
                 break
 
             available_tracks = [
@@ -1531,7 +1591,6 @@ def create_dj_session(
             selected = choose_next_track(
                 available_tracks,
                 previous,
-                current_genre,
             )
 
             if selected is None:
@@ -1550,7 +1609,7 @@ def create_dj_session(
         next_genre = choose_next_genre(
             current_genre,
             available_genres,
-            recent_genres[-3:],
+            recent_genres[-4:],
         )
 
         if next_genre is None:
@@ -1562,17 +1621,18 @@ def create_dj_session(
 
         if len(
             recent_genres
-        ) > 5:
+        ) > 6:
             recent_genres.pop(0)
 
         current_genre = next_genre
 
-    # Completar si quedaron pocos tracks.
+    # Completar la sesión.
     if len(session) < songs_per_session:
 
         remaining = [
             track
-            for track in tracks
+            for track
+            in tracks
             if track.get("id")
             not in used_ids
         ]
@@ -1583,7 +1643,10 @@ def create_dj_session(
 
         for track in remaining:
 
-            if len(session) >= songs_per_session:
+            if (
+                len(session)
+                >= songs_per_session
+            ):
                 break
 
             session.append(
@@ -1607,6 +1670,10 @@ def build_sessions(
 ):
     sessions = []
 
+    base_seed = int(
+        time.time()
+    )
+
     for index in range(
         session_count
     ):
@@ -1616,12 +1683,8 @@ def build_sessions(
             songs_per_session=songs_per_session,
             mode=mode,
             seed=(
-                int(time.time())
-                + index * 7919
-                + random.randint(
-                    0,
-                    999999,
-                )
+                base_seed
+                + index * 9973
             ),
         )
 
@@ -1634,7 +1697,7 @@ def build_sessions(
 
 
 # ============================================================
-# CREAR PLAYLIST EN SPOTIFY
+# CREAR PLAYLIST
 # ============================================================
 
 def create_playlist(
@@ -1650,7 +1713,8 @@ def create_playlist(
         json_data={
             "name": name,
             "description": (
-                "Creada automáticamente por Spotify Auto-Mix DJ."
+                "Creada automáticamente por Spotify Auto-Mix DJ. "
+                "Sesión musical con bloques, variedad y transiciones."
             ),
             "public": public,
             "collaborative": False,
@@ -1667,12 +1731,28 @@ def create_playlist(
         )
 
     uris = [
-        track.get("uri")
-        for track in tracks
-        if track.get("uri")
+        track.get(
+            "uri"
+        )
+        for track
+        in tracks
+        if track.get(
+            "uri"
+        )
     ]
 
-    # Spotify acepta lotes.
+    uris = list(
+        dict.fromkeys(
+            uris
+        )
+    )
+
+    if not uris:
+        raise RuntimeError(
+            "La sesión no contiene canciones válidas."
+        )
+
+    # Spotify permite añadir elementos en lote.
     for start in range(
         0,
         len(uris),
@@ -1693,8 +1773,8 @@ def create_playlist(
         )
 
     return {
-        "name": name,
         "id": playlist_id,
+        "name": name,
         "tracks": len(uris),
         "url": playlist.get(
             "external_urls",
@@ -1706,7 +1786,17 @@ def create_playlist(
 
 
 # ============================================================
-# CALLBACK OAUTH
+# INICIALIZAR ESTADO
+# ============================================================
+
+if TOKEN_KEY not in st.session_state:
+    st.session_state[
+        TOKEN_KEY
+    ] = None
+
+
+# ============================================================
+# CALLBACK
 # ============================================================
 
 if not st.session_state.get(
@@ -1714,8 +1804,12 @@ if not st.session_state.get(
 ):
 
     if (
-        st.query_params.get("code")
-        or st.query_params.get("error")
+        st.query_params.get(
+            "code"
+        )
+        or st.query_params.get(
+            "error"
+        )
     ):
         process_callback()
 
@@ -1734,26 +1828,22 @@ if not st.session_state.get(
 
     st.write(
         "Convierte tus Me gusta en sesiones de DJ "
-        "con bloques, cambios de género y variedad."
+        "con cambios de ambiente y mezcla de géneros."
     )
 
     st.info(
-        "La aplicación creará las playlists directamente "
-        "en tu cuenta de Spotify."
+        "Las playlists se crean directamente en tu cuenta de Spotify."
     )
 
     auth_url = get_authorize_url()
 
     if auth_url:
-
         st.link_button(
             "🎵 Iniciar sesión con Spotify",
             auth_url,
             use_container_width=True,
         )
-
     else:
-
         st.error(
             "No se pudo generar el enlace de Spotify."
         )
@@ -1777,7 +1867,8 @@ if not token:
         "Volver a iniciar sesión",
         type="primary",
     ):
-        logout()
+        clear_session()
+        st.rerun()
 
     st.stop()
 
@@ -1795,7 +1886,7 @@ try:
 except Exception as exc:
 
     st.error(
-        "No se pudo cargar tu perfil."
+        "No se pudo cargar tu perfil de Spotify."
     )
     st.exception(exc)
     st.stop()
@@ -1844,8 +1935,8 @@ st.title(
 )
 
 st.write(
-    "La aplicación toma tus canciones y construye "
-    "sesiones que cambian de ambiente progresivamente."
+    "Tu biblioteca se transforma automáticamente en "
+    "sesiones cortas y diferentes."
 )
 
 
@@ -1854,7 +1945,7 @@ st.write(
 # ============================================================
 
 st.subheader(
-    "⚙️ Configuración del DJ"
+    "⚙️ Configuración"
 )
 
 col1, col2, col3 = st.columns(
@@ -1884,7 +1975,7 @@ with col2:
 with col3:
 
     mode = st.selectbox(
-        "Modo",
+        "Modo DJ",
         [
             "DJ Profesional",
             "Tarde",
@@ -1899,41 +1990,60 @@ public_playlists = st.checkbox(
     value=False,
 )
 
+
 estimated_minutes = (
     songs_per_session * 3.5
 )
 
 st.caption(
-    f"Duración aproximada de cada sesión: "
-    f"{estimated_minutes:.0f} minutos."
+    f"Duración aproximada: "
+    f"{estimated_minutes:.0f} minutos por sesión."
 )
 
 
 # ============================================================
-# CARGAR ME GUSTA
+# BIBLIOTECA
 # ============================================================
 
 st.divider()
 
 st.subheader(
-    "❤️ Biblioteca"
+    "❤️ Mis Me gusta"
 )
 
-refresh_library = st.button(
-    "🔄 Actualizar Mis Me gusta"
+refresh = st.button(
+    "🔄 Actualizar biblioteca"
 )
 
 try:
 
     liked_tracks = load_liked_tracks(
         token,
-        force_reload=refresh_library,
+        force_reload=refresh,
     )
+
+    # Si actualizamos la biblioteca,
+    # el enriquecimiento anterior ya no coincide.
+    if refresh:
+        st.session_state.pop(
+            ENRICHED_KEY,
+            None
+        )
+
+except SpotifyRateLimit as exc:
+
+    st.error(
+        f"Spotify está limitando temporalmente las peticiones. "
+        f"Espera aproximadamente {exc.retry_after} segundos "
+        f"y vuelve a intentarlo."
+    )
+
+    st.stop()
 
 except Exception as exc:
 
     st.error(
-        "No se pudieron cargar tus canciones."
+        "No se pudieron cargar tus Me gusta."
     )
     st.exception(exc)
     st.stop()
@@ -1942,62 +2052,80 @@ except Exception as exc:
 if not liked_tracks:
 
     st.warning(
-        "No se encontraron canciones en tus Me gusta."
+        "No se encontraron canciones guardadas."
     )
     st.stop()
 
 
-col1, col2 = st.columns(
+artist_count = len(
+    {
+        artist_id
+        for track
+        in liked_tracks
+        for artist_id
+        in track.get(
+            "artist_ids",
+            [],
+        )
+    }
+)
+
+
+metric1, metric2 = st.columns(
     2
 )
 
-with col1:
-
+with metric1:
     st.metric(
         "Canciones",
         len(liked_tracks),
     )
 
-with col2:
-
-    artists_count = len(
-        {
-            artist_id
-            for track
-            in liked_tracks
-            for artist_id
-            in track.get(
-                "artist_ids",
-                [],
-            )
-        }
-    )
-
+with metric2:
     st.metric(
         "Artistas",
-        artists_count,
+        artist_count,
     )
 
 
 # ============================================================
-# INFORMACIÓN DE USO
+# CACHÉ DE GÉNEROS
 # ============================================================
 
-st.info(
-    "La primera generación puede tardar más porque la aplicación "
-    "necesita analizar los artistas. Después se reutiliza la "
-    "información guardada para evitar repetir todas esas consultas."
+artist_cache = get_artist_cache()
+
+cached_artists = len(
+    artist_cache
 )
 
+if cached_artists:
+
+    st.caption(
+        f"Información musical guardada de "
+        f"{cached_artists} artistas. "
+        "La aplicación no vuelve a consultarlos."
+    )
+
 
 # ============================================================
-# CREAR AUTO-MIX
+# CREAR AUTO MIX
 # ============================================================
 
 st.divider()
 
+st.subheader(
+    "🔥 Crear Auto-Mix"
+)
+
+st.write(
+    "La primera ejecución analiza una pequeña cantidad de artistas "
+    "y guarda los resultados. Las siguientes sesiones aprovechan "
+    "ese caché para evitar bombardear la API."
+)
+
+
 create_mix = st.button(
-    "🔥 GENERAR Y CREAR AUTO-MIX EN SPOTIFY",
+    "🔥 GENERAR Y CREAR PLAYLISTS EN SPOTIFY",
     type="primary",
     use_container_width=True,
 )
@@ -2008,11 +2136,11 @@ if create_mix:
     try:
 
         # ----------------------------------------------------
-        # 1. Analizar géneros
+        # 1. Analizar solamente artistas nuevos limitados.
         # ----------------------------------------------------
 
         with st.spinner(
-            "Analizando géneros y preparando tu biblioteca..."
+            "Preparando los géneros de tu biblioteca..."
         ):
 
             enriched_tracks = enrich_tracks(
@@ -2020,6 +2148,10 @@ if create_mix:
                 token,
             )
 
+
+        # ----------------------------------------------------
+        # 2. Mostrar distribución.
+        # ----------------------------------------------------
 
         genre_counts = Counter(
             track.get(
@@ -2030,28 +2162,27 @@ if create_mix:
             in enriched_tracks
         )
 
-
         st.subheader(
-            "🎼 Géneros detectados"
+            "🎼 Distribución detectada"
         )
 
-        detected_text = " • ".join(
+        distribution = " • ".join(
             f"{genre}: {count}"
             for genre, count
             in genre_counts.most_common()
         )
 
         st.write(
-            detected_text
+            distribution
         )
 
 
         # ----------------------------------------------------
-        # 2. Construir sesiones
+        # 3. Construir sesiones.
         # ----------------------------------------------------
 
         with st.spinner(
-            "Construyendo las sesiones como DJ..."
+            "Construyendo tus sesiones como DJ..."
         ):
 
             sessions = build_sessions(
@@ -2070,22 +2201,20 @@ if create_mix:
 
 
         # ----------------------------------------------------
-        # 3. Crear playlists
+        # 4. Crear playlists.
         # ----------------------------------------------------
-
-        created_playlists = []
-
-        progress = st.progress(0)
-        status = st.empty()
-
 
         prefix = SESSION_MODES.get(
             mode,
             SESSION_MODES[
                 "DJ Profesional"
             ],
-        )["name_prefix"]
+        )["prefix"]
 
+        created = []
+
+        progress = st.progress(0)
+        status = st.empty()
 
         for index, session in enumerate(
             sessions,
@@ -2097,48 +2226,46 @@ if create_mix:
                 f"{index}/{len(sessions)}..."
             )
 
-            playlist_name = (
-                f"{prefix} #{index:02d}"
-            )
-
-            created = create_playlist(
+            playlist = create_playlist(
                 token=token,
-                name=playlist_name,
+                name=(
+                    f"{prefix} #{index:02d}"
+                ),
                 tracks=session,
                 public=public_playlists,
             )
 
-            created_playlists.append(
-                created
+            created.append(
+                playlist
             )
 
             progress.progress(
                 index / len(sessions)
             )
 
+            # Pequeña separación entre creación de playlists.
+            time.sleep(0.5)
+
         progress.empty()
         status.empty()
 
-
         st.session_state[
             CREATED_KEY
-        ] = created_playlists
-
+        ] = created
 
         # ----------------------------------------------------
-        # 4. Resultado
+        # 5. Resultado.
         # ----------------------------------------------------
 
         st.divider()
 
         st.success(
             f"✅ Se crearon "
-            f"{len(created_playlists)} playlists "
-            f"directamente en Spotify."
+            f"{len(created)} playlists directamente "
+            f"en Spotify."
         )
 
-
-        for playlist in created_playlists:
+        for playlist in created:
 
             url = playlist.get(
                 "url"
@@ -2163,12 +2290,19 @@ if create_mix:
                 )
 
 
+    except SpotifyRateLimit as exc:
+
+        st.error(
+            f"Spotify volvió a limitar las peticiones. "
+            f"Espera aproximadamente {exc.retry_after} segundos "
+            f"y vuelve a ejecutar la creación."
+        )
+
     except Exception as exc:
 
         st.error(
             "No se pudo completar el Auto-Mix."
         )
-
         st.exception(exc)
 
 
@@ -2186,7 +2320,7 @@ if last_created:
     st.divider()
 
     st.subheader(
-        "🎶 Últimas playlists creadas"
+        "🎶 Playlists creadas"
     )
 
     for playlist in last_created:
@@ -2211,13 +2345,13 @@ if last_created:
 
 
 # ============================================================
-# RESUMEN
+# INFORMACIÓN
 # ============================================================
 
 st.divider()
 
 st.caption(
     "Spotify Auto-Mix DJ • Las canciones pueden reutilizarse "
-    "entre diferentes sesiones, pero no se repiten dentro "
+    "entre sesiones diferentes, pero no se repiten dentro "
     "de una misma sesión."
 )
